@@ -1,0 +1,2 @@
+pymongo>=4.3.3
+pymilvus>=2.2.1
