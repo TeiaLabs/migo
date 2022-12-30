@@ -11,6 +11,7 @@ from pymongo.monitoring import (
     ConnectionPoolListener,
     ServerHeartbeatListener,
 )
+from pymilvus import CollectionSchema
 from pymongo.encryption_options import AutoEncryptionOpts
 
 
@@ -48,6 +49,13 @@ class BaseConfig:
             return {key: value for key, value in out.items() if value is not None}
 
         return out
+
+
+@dataclass
+class MilvusCollectionConfig(BaseConfig):
+    schema: CollectionSchema
+    shards_num: int | None = None
+    consistency_level: str | int | None = None
 
 
 @dataclass(frozen=True, slots=True)

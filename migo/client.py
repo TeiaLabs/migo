@@ -38,7 +38,10 @@ class Client:
         for name, client in connections.list_connections():
             if client is not None and name in mongo_databases:
                 databases.append(
-                    Database(self.__mongo_client.get_database(name), client)
+                    Database(
+                        mongo_database=self.__mongo_client.get_database(name),
+                        milvus_database=(name, client),
+                    )
                 )
             elif client is not None:
                 try:
@@ -57,7 +60,10 @@ class Client:
         if name not in milvus_databases:
             raise ValueError(f"Database name not found in milvus: {name}")
 
-        return Database(self.__mongo_client.get_database(name), milvus_databases[name])
+        return Database(
+            mongo_database=self.__mongo_client.get_database(name),
+            milvus_database=(name, milvus_databases[name]),
+        )
 
     def get_default_database(self) -> Database:
         milvus_databases = connections.list_connections()
@@ -68,7 +74,10 @@ class Client:
         if milvus_conn is None:
             raise ValueError("Milvus has no open connections")
 
-        return Database(self.__mongo_client.get_database(milvus_alias), milvus_conn)
+        return Database(
+            mongo_database=self.__mongo_client.get_database(milvus_alias),
+            milvus_database=(milvus_alias, milvus_conn),
+        )
 
     def drop_database(self, name: str) -> None:
         milvus_databases = {
