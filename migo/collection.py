@@ -368,41 +368,8 @@ class Collection:
         if not milvus_result.delete_count:
             return
 
-    def distinct(
-        self,
-        key,
-        filter: dict | None = None,
-        fields: dict[str, bool] | None = None,
-        sort: dict[tuple[str, str | int]] | None = None,
-        skip: int = 0,
-        limit: int = 0,
-    ):
-        mongo_results = self.__mongo_collection.find(
-            filter=filter,
-            projection=fields,
-            sort=sort,
-            skip=skip,
-            limit=limit,
-        ).distinct(key=key)
-
-        milvus_ids = {}
-        for result in mongo_results:
-            milvus_id = result.get("milvus_id", None)
-            if milvus_id is not None:
-                milvus_ids[milvus_id] = result
-
-        if milvus_ids:
-            # Query milvus by mongo's primary keys if needed
-
-            milvus_results = self.__milvus_collection.query(
-                f"pk in {list(milvus_ids.keys())}"
-            )
-
-            for result in milvus_results:
-                for hit in result:
-                    milvus_ids[hit.id]["milvus_data"] = hit
-
-        return list(milvus_ids.values())
+    def distinct(self, key, filter: dict | None = None):
+        return self.__mongo_collection.distinct(key=key, filter=filter)
 
     def drop(self):
         self.__mongo_collection.drop()
