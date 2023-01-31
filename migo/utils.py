@@ -111,7 +111,7 @@ class MilvusBinaryIndex:
 
 @dataclass
 class MongoIndex:
-    key: str
+    key: Union[str, list[str, IndexType]]
     name: Optional[str] = None
     unique: bool = False
     type: IndexType = IndexType.ASCENDING
@@ -160,7 +160,7 @@ class BatchDocument:
 @dataclass
 class Index:
     mongo_index: Union[MongoIndex, MongoGeoIndex]
-    milvus_index: Union[
+    milvus_indexes: list[Union[
         MilvusFloatingIndex,
         MilvusBinaryIndex,
-    ]
+    ]]

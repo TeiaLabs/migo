@@ -347,7 +347,11 @@ class Collection:
 
     def create_indexes(self, indexes: list[Index]):
         mongo_indexes = [asdict(index.mongo_index) for index in indexes]
-        milvus_indexes = [asdict(index.milvus_index) for index in indexes]
+        milvus_indexes = [
+            asdict(milvus_index)
+            for index in indexes
+            for milvus_index in index.milvus_indexes
+        ]
 
         for mongo_index in mongo_indexes:
             mongo_index = _filter_none(mongo_index)
