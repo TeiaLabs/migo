@@ -1,42 +1,9 @@
-from dataclasses import dataclass
-from typing import Any, Callable, Generic, TypeVar
+from dataclasses import asdict
 
 from pymilvus import Collection as MilvusCollection
 from pymongo.collection import Collection as MongoCollection
 
-F = TypeVar("F", bound=Callable[..., Any])
-
-
-class copy_sig(Generic[F]):
-    def __init__(self, target: F) -> None:
-        ...
-
-    def __call__(self, wrapped: Callable[..., Any]) -> F:
-        ...
-
-
-@dataclass
-class Field:
-    mongo_field: str
-    milvus_field: str
-
-
-@dataclass
-class Filter:
-    mongo_filter: dict | None = None
-    milvus_filter: dict[str, list] | None = None
-
-
-@dataclass
-class Document:
-    mongo_document: dict
-    milvus_array: list | None = None
-
-
-@dataclass
-class BatchDocument:
-    mongo_documents: list[dict]
-    milvus_arrays: list[list] | None = None
+from .utils import BatchDocument, Document, DropIndex, Field, Filter, Index, copy_sig
 
 
 class Collection:
@@ -378,23 +345,45 @@ class Collection:
     def count(self, filter: dict | None = None):
         return self.__mongo_collection.count_documents(filter)
 
+    def create_indexes(self, indexes: list[Index]):
+        mongo_indexes = [asdict(index.mongo_index) for index in indexes]
+        milvus_indexes = [asdict(index.milvus_index) for index in indexes]
+
+        for mongo_index in mongo_indexes:
+            mongo_index = _filter_none(mongo_index)
+            mongo_index["background"] = True
+            key = (mongo_index.pop("key"), mongo_index.pop("type"))
+
+            self.__mongo_collection.create_index(key, **mongo_index)
+
+        for milvus_index in milvus_indexes:
+            milvus_index = _filter_none(milvus_index)
+            milvus_index["field_name"] = milvus_index.pop("key")
+            if "name" in milvus_index:
+                milvus_index["index_name"] = milvus_index.pop("name")
+
+            index_type: dict = milvus_index["index_type"]
+            milvus_index["index_params"] = {
+                "metric_type": milvus_index["metric_type"],
+                "index_type": index_type.pop("name"),
+                "index_params": {},
+            }
+            if index_type:
+                milvus_index["index_params"]["params"] = index_type
+
+            self.__milvus_collection.create_index(**milvus_index)
+
+    def drop_indexes(self, indexes: list[DropIndex]):
+        for index in indexes:
+            if index.mongo_index is not None:
+                self.__mongo_collection.drop_index(index.mongo_index)
+            if index.milvus_index is not None:
+                if not index.milvus_index:
+                    self.__milvus_collection.drop_index()
+                else:
+                    self.__milvus_collection.drop_index(index_name=index.milvus_index)
+
     # =========== Mongo specific ===========
-
-    @copy_sig(MongoCollection.create_index)
-    def create_index(self, *args, **kwargs):
-        return self.__mongo_collection.create_index(*args, **kwargs)
-
-    @copy_sig(MongoCollection.create_indexes)
-    def create_indexes(self, *args, **kwargs):
-        return self.__mongo_collection.create_indexes(*args, **kwargs)
-
-    @copy_sig(MongoCollection.drop_index)
-    def drop_index(self, *args, **kwargs):
-        return self.__mongo_collection.drop_index(*args, **kwargs)
-
-    @copy_sig(MongoCollection.drop_indexes)
-    def drop_indexes(self, *args, **kwargs):
-        return self.__mongo_collection.drop_indexes(*args, **kwargs)
 
     @copy_sig(MongoCollection.with_options)
     def with_options(self, *args, **kwargs):
@@ -473,3 +462,7 @@ class Collection:
             return
 
         return milvus_result
+
+
+def _filter_none(obj: dict) -> dict:
+    return {key: val for key, val in obj.items() if key is not None}
