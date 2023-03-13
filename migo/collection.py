@@ -1,9 +1,21 @@
 from dataclasses import asdict
+from typing import Any
 
 from pymilvus import Collection as MilvusCollection
 from pymongo.collection import Collection as MongoCollection
+from pymongo.results import (
+    DeleteResult,
+    InsertManyResult,
+    InsertOneResult,
+    UpdateResult,
+)
 
 from .utils import BatchDocument, Document, DropIndex, Field, Filter, Index, copy_sig
+
+EMPTY_UPDATE = UpdateResult(
+    acknowledged=True, raw_result={"nModified": 0, "n": 0, "upserted": None}
+)
+EMPTY_DELETE = DeleteResult(acknowledged=True, raw_result={"n": 0})
 
 
 class Collection:
@@ -111,7 +123,7 @@ class Collection:
         self,
         data: Document,
         partition_name: str | None = None,
-    ):
+    ) -> InsertOneResult:
         if data.milvus_array is not None:
             result = self.__milvus_collection.insert(
                 [data.milvus_array], partition_name
@@ -120,7 +132,7 @@ class Collection:
 
         return self.__mongo_collection.insert_one(data.mongo_document)
 
-    def insert_many(self, data: BatchDocument, partition_name):
+    def insert_many(self, data: BatchDocument, partition_name) -> InsertManyResult:
         if data.milvus_arrays is not None:
             result = self.__milvus_collection.insert(data.milvus_arrays, partition_name)
             for document, milvus_pk in zip(data.mongo_documents, result.primary_keys):
@@ -135,7 +147,7 @@ class Collection:
         search_param: dict | None = None,
         partition_name: str | None = None,
         upsert: bool = False,
-    ):
+    ) -> UpdateResult:
         if filter.milvus_filter is None:
             return self.__mongo_collection.replace_one(
                 filter=filter.mongo_filter,
@@ -151,7 +163,7 @@ class Collection:
         )
 
         if not document:
-            return
+            return EMPTY_UPDATE
 
         mongo_result = self.__mongo_collection.replace_one(
             filter={"_id": document["_id"]},
@@ -172,15 +184,15 @@ class Collection:
                 recover=True,
             )
         else:
-            return
+            return EMPTY_UPDATE
 
         if milvus_result is None or not milvus_result.insert_count:
             # Add the old document back in case something went wrong with milvus
             document.pop("milvus_data")
             self.__mongo_collection.replace_one({"_id": document["_id"]}, document)
-            return
+            return EMPTY_UPDATE
 
-        self.__mongo_collection.update_one(
+        return self.__mongo_collection.update_one(
             filter={"_id": document["_id"]},
             update={"milvus_id": milvus_result[0][0].id},
             upsert=upsert,
@@ -193,13 +205,12 @@ class Collection:
         search_param: dict | None = None,
         partition_name: str | None = None,
         upsert: bool = False,
-    ):
+    ) -> UpdateResult:
         if filter.milvus_filter is None:
-            self.__mongo_collection.update_one(
+            return self.__mongo_collection.update_one(
                 filter.mongo_filter,
                 data.mongo_document,
             )
-            return
 
         document = self.find_one(
             filter=filter,
@@ -209,7 +220,7 @@ class Collection:
         )
 
         if not document:
-            return
+            return EMPTY_UPDATE
 
         mongo_result = self.__mongo_collection.update_one(
             {"_id": document["_id"]}, data.mongo_document
@@ -228,15 +239,15 @@ class Collection:
                 recover=True,
             )
         else:
-            return
+            return EMPTY_UPDATE
 
         if milvus_result is None or not milvus_result.insert_count:
             # Add the old document back in case something went wrong with milvus
             document.pop("milvus_data")
             self.__mongo_collection.update_one({"_id": document["_id"]}, document)
-            return
+            return EMPTY_UPDATE
 
-        self.__mongo_collection.update_one(
+        return self.__mongo_collection.update_one(
             filter={"_id": document["_id"]},
             update={"milvus_id": milvus_result[0][0].id},
             upsert=upsert,
@@ -249,14 +260,13 @@ class Collection:
         search_param: dict | None = None,
         partition_name: str | None = None,
         upsert: bool = True,
-    ):
+    ) -> UpdateResult:
         if filter.milvus_filter is None:
-            self.__mongo_collection.update_many(
+            return self.__mongo_collection.update_many(
                 filter.mongo_filter,
                 data.mongo_document,
                 upsert=upsert,
             )
-            return
 
         documents = self.find_many(
             filter=filter,
@@ -265,7 +275,7 @@ class Collection:
             partition_names=[partition_name],
         )
         if not documents:
-            return
+            return EMPTY_UPDATE
 
         mongo_filter = {"_id": {"$in": [doc["_id"] for doc in documents]}}
         return self.__mongo_collection.update_many(
@@ -278,10 +288,9 @@ class Collection:
         self,
         filter: Filter | None = None,
         partition_name: str | None = None,
-    ):
+    ) -> DeleteResult:
         if filter.milvus_filter is None:
-            self.__mongo_collection.delete_one(filter.mongo_filter)
-            return
+            return self.__mongo_collection.delete_one(filter.mongo_filter)
 
         document = self.find_one(
             filter=filter,
@@ -290,11 +299,11 @@ class Collection:
         )
 
         if not document:
-            return
+            return EMPTY_DELETE
 
         mongo_result = self.__mongo_collection.delete_one({"_id": document["_id"]})
         if not mongo_result.deleted_count:
-            return
+            return EMPTY_DELETE
 
         milvus_result = self.__milvus_collection.delete(
             f"id in [{document['milvus_id']}]"
@@ -302,16 +311,17 @@ class Collection:
         if not milvus_result.delete_count:
             document.pop("milvus_data")
             self.__mongo_collection.insert_one(document)
-            return
+            return EMPTY_DELETE
+
+        return mongo_result
 
     def delete_many(
         self,
         filter: Filter | None = None,
         partition_name: str | None = None,
-    ):
+    ) -> DeleteResult:
         if filter.milvus_filter is None:
-            self.__mongo_collection.delete_many(filter.mongo_filter)
-            return
+            return self.__mongo_collection.delete_many(filter.mongo_filter)
 
         documents = self.find_many(
             filter=filter,
@@ -320,29 +330,29 @@ class Collection:
         )
 
         if not documents:
-            return
+            return EMPTY_DELETE
 
         mongo_result = self.__mongo_collection.delete_many(
             {"_id": {"$in": [doc["_id"] for doc in documents]}}
         )
         if not mongo_result.deleted_count:
-            return
+            return mongo_result
 
         milvus_filter = [doc["milvus_id"] for doc in documents]
         milvus_result = self.__milvus_collection.delete(
             expr=f"id in [{', '.join(list(map(str, milvus_filter)))}]"
         )
         if not milvus_result.delete_count:
-            return
+            return mongo_result
 
-    def distinct(self, key, filter: dict | None = None):
+    def distinct(self, key, filter: dict | None = None) -> list[Any]:
         return self.__mongo_collection.distinct(key=key, filter=filter)
 
     def drop(self):
         self.__mongo_collection.drop()
         self.__milvus_collection.drop()
 
-    def count(self, filter: dict | None = None):
+    def count(self, filter: dict | None = None) -> int:
         return self.__mongo_collection.count_documents(filter)
 
     def create_indexes(self, indexes: list[Index]):
