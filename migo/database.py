@@ -77,3 +77,7 @@ class Database:
     def delete_collection(self, name: str) -> None:
         self.__milvus_database[1].drop_collection(name)
         self.__mongo_database.drop_collection(name)
+
+    @property
+    def name(self) -> str:
+        return self.__mongo_database.name
